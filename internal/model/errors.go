@@ -17,8 +17,8 @@ var (
 
 // FieldError describes a validation problem on a single input field.
 type FieldError struct {
-	Field   string `json:"field"`
-	Message string `json:"message"`
+	Field   string `json:"field" validate:"required" example:"email"`
+	Message string `json:"message" validate:"required" example:"must be a valid email address"`
 }
 
 // ValidationError carries per-field details and matches ErrInvalidInput.

@@ -229,7 +229,8 @@ Nama flag boleh disesuaikan dengan konvensi bahasa, tapi maknanya harus sama. Na
 1. **WAJIB** - REST berversi di path: `/api/v1/...`.
 2. **WAJIB** - gRPC didefinisikan di file `.proto` dengan package berversi (contoh `user.v1`). Kode hasil generate di-commit, dan perintah generate tertulis di README.
 3. **WAJIB** - Validasi input dilakukan di batas controller, memakai validator bawaan/populer di ekosistem framework.
-4. **OPSIONAL** - Dokumentasi OpenAPI/Swagger untuk REST.
+4. **WAJIB** - Spec OpenAPI/Swagger untuk REST, dibuat otomatis dari kode (anotasi atau definisi route) dan di-commit. Spec ini jadi kontrak untuk frontend (generate client TypeScript bertipe). UI dokumentasinya bisa dimatikan lewat env, dan default-nya mati di production.
+5. **WAJIB** - Ada perintah untuk generate ulang spec dan pengecekan di CI yang gagal kalau spec tidak sesuai dengan kode.
 
 ---
 
@@ -301,7 +302,7 @@ Tujuannya memberi contoh nyata yang menyentuh **setiap layer**.
 5. **Quick start**: langkah dari clone sampai service running dan endpoint bisa dipanggil.
 6. Referensi konfigurasi: tabel semua env beserta default dan fungsinya.
 7. Cara mengaktifkan gRPC, consumer, dan OpenTelemetry, termasuk cara membuka Grafana.
-8. **Langkah membuat endpoint REST baru** (step by step, dari migration sampai router).
+8. **Langkah membuat endpoint REST baru** (step by step, dari migration sampai router, termasuk update spec OpenAPI/Swagger).
 9. **Langkah membuat endpoint gRPC baru** (step by step, dari file proto sampai registrasi).
 10. **Langkah membuat consumer baru** (step by step, dari definisi event sampai registrasi handler, dan cara mengetesnya).
 11. Testing: cara menjalankan unit test, coverage, dan integration test.

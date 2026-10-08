@@ -1,0 +1,263 @@
+basePath: /
+definitions:
+  dto.CreateUserRequest:
+    properties:
+      email:
+        example: andi@example.com
+        format: email
+        maxLength: 255
+        type: string
+      name:
+        example: Andi Pratama
+        maxLength: 100
+        minLength: 2
+        type: string
+      password:
+        description: bcrypt limit is 72 bytes
+        example: Password123!
+        maxLength: 72
+        minLength: 8
+        type: string
+      phone:
+        example: "+6281234567890"
+        type: string
+    required:
+    - email
+    - name
+    - password
+    type: object
+  dto.UserResponse:
+    properties:
+      created_at:
+        format: date-time
+        type: string
+      email:
+        example: andi@example.com
+        type: string
+      id:
+        example: 01928f6a-0000-7000-8000-000000000001
+        format: uuid
+        type: string
+      name:
+        example: Andi Pratama
+        type: string
+      phone:
+        example: "+6281200000001"
+        type: string
+      updated_at:
+        format: date-time
+        type: string
+    required:
+    - created_at
+    - email
+    - id
+    - name
+    - phone
+    - updated_at
+    type: object
+  model.FieldError:
+    properties:
+      field:
+        example: email
+        type: string
+      message:
+        example: must be a valid email address
+        type: string
+    required:
+    - field
+    - message
+    type: object
+  rest.DataResponse:
+    properties:
+      data: {}
+      meta:
+        $ref: '#/definitions/rest.Meta'
+    required:
+    - data
+    - meta
+    type: object
+  rest.ErrorBody:
+    properties:
+      code:
+        example: NOT_FOUND
+        type: string
+      details:
+        items:
+          $ref: '#/definitions/model.FieldError'
+        type: array
+      message:
+        example: 'not found: user 01928f6a-0000-7000-8000-000000000001'
+        type: string
+    required:
+    - code
+    - message
+    type: object
+  rest.ErrorResponse:
+    properties:
+      error:
+        $ref: '#/definitions/rest.ErrorBody'
+      meta:
+        $ref: '#/definitions/rest.Meta'
+    required:
+    - error
+    - meta
+    type: object
+  rest.HealthResponse:
+    properties:
+      checks:
+        additionalProperties:
+          type: string
+        type: object
+      status:
+        example: ok
+        type: string
+    type: object
+  rest.Meta:
+    properties:
+      request_id:
+        example: 6f1c2b9e-1d2a-4a51-9f3e-2b7c1d0e8a11
+        type: string
+    type: object
+info:
+  contact: {}
+  description: 'REST API of the codebase-go service template. Every response uses
+    the same JSON envelope: {data, meta} on success and {error, meta} on failure.'
+  title: codebase-go API
+  version: "1.0"
+paths:
+  /api/v1/users:
+    post:
+      consumes:
+      - application/json
+      description: Registers a user and publishes the user.created event (when MQ
+        is enabled).
+      operationId: createUser
+      parameters:
+      - description: User to create
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location:
+              description: URL of the created user
+              type: string
+          schema:
+            allOf:
+            - $ref: '#/definitions/rest.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.UserResponse'
+              type: object
+        "400":
+          description: Validation failed (see error.details)
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "409":
+          description: Email already registered
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a user
+      tags:
+      - users
+  /api/v1/users/{id}:
+    get:
+      description: Reads from Redis first (cache-aside), then PostgreSQL.
+      operationId: getUser
+      parameters:
+      - description: User ID (UUID)
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/rest.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.UserResponse'
+              type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a user by ID
+      tags:
+      - users
+  /healthz:
+    get:
+      operationId: liveness
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.HealthResponse'
+      summary: Liveness probe
+      tags:
+      - health
+  /readyz:
+    get:
+      description: Checks every enabled dependency (PostgreSQL, Redis, RabbitMQ).
+      operationId: readiness
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.HealthResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/rest.HealthResponse'
+      summary: Readiness probe
+      tags:
+      - health
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    description: 'Access token. Format: "Bearer <token>".'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

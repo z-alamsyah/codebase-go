@@ -15,6 +15,17 @@ import (
 	"github.com/z-alamsyah/codebase-go/internal/config"
 )
 
+// Swagger general API info (swaggo). Regenerate docs with `make swagger`.
+//
+//	@title						codebase-go API
+//	@version					1.0
+//	@description				REST API of the codebase-go service template. Every response uses the same JSON envelope: {data, meta} on success and {error, meta} on failure.
+//	@BasePath					/
+//	@schemes					http https
+//	@securityDefinitions.apikey	BearerAuth
+//	@in							header
+//	@name						Authorization
+//	@description				Access token. Format: "Bearer <token>".
 func main() {
 	if err := run(); err != nil {
 		slog.Error("service exited with error", slog.Any("error", err))

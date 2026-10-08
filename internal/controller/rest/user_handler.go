@@ -29,6 +29,20 @@ func (c *createUserRequest) Bind(*http.Request) error {
 }
 
 // GetByID handles GET /api/v1/users/{id}.
+//
+//	@ID				getUser
+//	@Summary		Get a user by ID
+//	@Description	Reads from Redis first (cache-aside), then PostgreSQL.
+//	@Tags			users
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string	true	"User ID (UUID)"	format(uuid)
+//	@Success		200	{object}	DataResponse{data=dto.UserResponse}
+//	@Failure		400	{object}	ErrorResponse	"Invalid ID"
+//	@Failure		401	{object}	ErrorResponse
+//	@Failure		404	{object}	ErrorResponse	"User not found"
+//	@Failure		500	{object}	ErrorResponse
+//	@Router			/api/v1/users/{id} [get]
 func (h *UserHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -45,6 +59,22 @@ func (h *UserHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // Create handles POST /api/v1/users.
+//
+//	@ID				createUser
+//	@Summary		Create a user
+//	@Description	Registers a user and publishes the user.created event (when MQ is enabled).
+//	@Tags			users
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			request	body		dto.CreateUserRequest	true	"User to create"
+//	@Success		201		{object}	DataResponse{data=dto.UserResponse}
+//	@Header			201		{string}	Location		"URL of the created user"
+//	@Failure		400		{object}	ErrorResponse	"Validation failed (see error.details)"
+//	@Failure		401		{object}	ErrorResponse
+//	@Failure		409		{object}	ErrorResponse	"Email already registered"
+//	@Failure		500		{object}	ErrorResponse
+//	@Router			/api/v1/users [post]
 func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createUserRequest
 	if err := bind(r, &req); err != nil {

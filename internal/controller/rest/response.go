@@ -20,13 +20,26 @@ type Envelope struct {
 }
 
 type ErrorBody struct {
-	Code    string             `json:"code"`
-	Message string             `json:"message"`
+	Code    string             `json:"code" validate:"required" example:"NOT_FOUND"`
+	Message string             `json:"message" validate:"required" example:"not found: user 01928f6a-0000-7000-8000-000000000001"`
 	Details []model.FieldError `json:"details,omitempty"`
 }
 
 type Meta struct {
-	RequestID string `json:"request_id,omitempty"`
+	RequestID string `json:"request_id,omitempty" example:"6f1c2b9e-1d2a-4a51-9f3e-2b7c1d0e8a11"`
+}
+
+// DataResponse and ErrorResponse document the two shapes of Envelope for
+// Swagger only. Handlers always write Envelope. Use them in annotations as
+// DataResponse{data=dto.X} and ErrorResponse.
+type DataResponse struct {
+	Data any  `json:"data" validate:"required"`
+	Meta Meta `json:"meta" validate:"required"`
+}
+
+type ErrorResponse struct {
+	Error ErrorBody `json:"error" validate:"required"`
+	Meta  Meta      `json:"meta" validate:"required"`
 }
 
 // bind decodes the JSON body into v and runs v.Bind (validation) via

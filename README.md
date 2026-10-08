@@ -31,6 +31,7 @@ Aturan umum yang dipakai template ini (tidak terikat bahasa) ada di [`docs/CODEB
 |---|---|---|
 | REST API (chi) | Aktif | `REST_ENABLED=true` |
 | Healthcheck `/healthz` + `/readyz` | Selalu aktif | - |
+| Swagger UI + spec (swaggo) | Mati di kode, aktif di `.env.example` | `SWAGGER_ENABLED=true` |
 | PostgreSQL (GORM) | Aktif | - |
 | Redis (cache + idempotency) | Aktif | - |
 | Logging (redaction, pretty/JSON) | Aktif | `LOG_LEVEL`, `LOG_FORMAT` |
@@ -67,6 +68,7 @@ Contoh fitur yang sudah jadi (menyentuh semua layer):
 | Logger | `log/slog` + [tint](https://github.com/lmittmann/tint) (mode pretty) |
 | Telemetry | OpenTelemetry SDK, `otelhttp`, `otelgrpc`, `otelpgx`, `redisotel`, `otelslog` |
 | Test | [testify](https://github.com/stretchr/testify) + [go.uber.org/mock](https://github.com/uber-go/mock) |
+| Dokumentasi API | [swaggo/swag](https://github.com/swaggo/swag) (Swagger 2.0 dari anotasi) + [http-swagger](https://github.com/swaggo/http-swagger) |
 | Lint | [golangci-lint v2](https://golangci-lint.run) |
 
 ---
@@ -158,8 +160,12 @@ Contoh fitur yang sudah jadi (menyentuh semua layer):
 │   ├── app/                    # Entrypoint service
 │   └── migrate/                # CLI migration + seed (file SQL di-embed)
 ├── deployments/                # Config OTel Collector, Tempo, Loki, Prometheus, Grafana
-├── docs/CODEBASE_RULES.md      # Aturan codebase (generic, lintas bahasa)
-├── gen/proto/                  # Hasil generate buf (di-commit, jangan diedit manual)
+├── docs/
+│   ├── CODEBASE_RULES.md       # Aturan codebase (generic, lintas bahasa)
+│   └── ZITADEL_INTEGRATION.md  # Panduan auth + multi-tenant dengan Zitadel (BE + FE)
+├── gen/
+│   ├── openapi/                # Hasil generate swag: docs.go, swagger.json, swagger.yaml (di-commit)
+│   └── proto/                  # Hasil generate buf (di-commit, jangan diedit manual)
 ├── internal/
 │   ├── app/                    # Wiring dependency + lifecycle (start, graceful shutdown)
 │   ├── config/                 # Struct config dari env + validasi
@@ -195,10 +201,10 @@ Contoh fitur yang sudah jadi (menyentuh semua layer):
 | Docker + Docker Compose v2 | Docker 24+ | Untuk PostgreSQL, Redis, RabbitMQ, dan stack observability |
 | make | bawaan macOS/Linux | Opsional, semua perintah juga bisa dijalankan manual |
 
-Tidak perlu install `buf`, `protoc`, `mockgen`, atau `golangci-lint` secara global:
+Tidak perlu install `buf`, `protoc`, `mockgen`, `swag`, atau `golangci-lint` secara global:
 
 - `protoc-gen-go`, `protoc-gen-go-grpc`, dan `mockgen` dikunci di `go.mod` (blok `tool`) dan dijalankan lewat `go tool`.
-- `buf` dan `golangci-lint` dijalankan lewat `go run` dengan versi yang dikunci di `Makefile`.
+- `buf`, `swag`, dan `golangci-lint` dijalankan lewat `go run` dengan versi yang dikunci di `Makefile`.
 
 Opsional untuk mencoba gRPC: [grpcurl](https://github.com/fullstorydev/grpcurl) (`brew install grpcurl`).
 
@@ -230,6 +236,8 @@ Output yang diharapkan:
 ```
 12:31:27 INF service started env=local http_port=8080 rest=true grpc=false mq=false consumer=false otel=false log_level=info
 ```
+
+Dokumentasi API interaktif: buka http://localhost:8080/swagger/index.html (aktif karena `.env.example` mengisi `SWAGGER_ENABLED=true`). Spec mentahnya ada di `/swagger/doc.json` dan di file `gen/openapi/swagger.json` / `swagger.yaml`, yang bisa dipakai FE untuk generate client TypeScript.
 
 Cek dari terminal lain:
 
@@ -271,6 +279,7 @@ Semua config dibaca dari environment variable. File `.env` hanya untuk lokal dan
 | `REST_ENABLED` | `true` | Route bisnis `/api/*`. Server HTTP tetap jalan untuk healthcheck walau `false`. |
 | `HTTP_PORT` | `8080` | Port HTTP |
 | `HTTP_REQUEST_TIMEOUT` | `10s` | Timeout per request REST |
+| `SWAGGER_ENABLED` | `false` (`.env.example`: `true`) | Swagger UI di `/swagger/index.html` dan spec di `/swagger/doc.json` |
 | `HTTP_TRUSTED_PROXIES` | `0` | Jumlah proxy di depan app. `0` = abaikan `X-Forwarded-For` (tidak bisa dipalsukan client). |
 | `GRPC_ENABLED` | `false` | Jalankan gRPC server |
 | `GRPC_PORT` | `9090` | Port gRPC |
@@ -487,13 +496,15 @@ func (s *Service) UpdateName(ctx context.Context, id uuid.UUID, name string) (mo
 
 **Langkah 6 - Unit test service** (`internal/service/user/service_test.go`). Tambah fungsi `TestService_UpdateName` dengan pola table-driven yang sama: kasus sukses, not found, error repository, dan error cache yang diabaikan.
 
-**Langkah 7 - DTO** (`internal/controller/dto/user.go`):
+**Langkah 7 - DTO** (`internal/controller/dto/user.go`). Tag `validate` dipakai dua kali: untuk validasi saat runtime, dan oleh swag untuk menandai field wajib serta batas min/max di Swagger. Tag `example` mengisi contoh nilai di Swagger UI:
 
 ```go
 type UpdateUserRequest struct {
-	Name string `json:"name" validate:"required,min=2,max=100"`
+	Name string `json:"name" validate:"required,min=2,max=100" example:"Andi P."`
 }
 ```
+
+Untuk DTO response, beri `validate:"required"` pada field yang selalu ada, supaya client TypeScript hasil generate tidak menganggapnya opsional.
 
 **Langkah 8 - Controller REST** (`internal/controller/rest`):
 
@@ -528,7 +539,43 @@ func (h *UserHandler) UpdateName(w http.ResponseWriter, r *http.Request) {
 
 Tambahkan juga test di `user_handler_test.go`.
 
-**Langkah 9 - Router** (`internal/router/http.go`). Route di dalam group `/api/v1` otomatis mendapat middleware request log, auth, dan timeout:
+**Langkah 9 - Dokumentasi Swagger.** Tulis anotasi swaggo tepat di atas handler (contoh lengkap ada di `user_handler.go`). Response sukses memakai `DataResponse{data=<DTO>}`, response gagal memakai `ErrorResponse`, sesuai envelope JSON yang benar-benar dikirim:
+
+```go
+// UpdateName handles PATCH /api/v1/users/{id}.
+//
+//	@ID				updateUserName
+//	@Summary		Update a user's name
+//	@Tags			users
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string					true	"User ID (UUID)"	format(uuid)
+//	@Param			request	body		dto.UpdateUserRequest	true	"New name"
+//	@Success		200		{object}	DataResponse{data=dto.UserResponse}
+//	@Failure		400		{object}	ErrorResponse	"Validation failed (see error.details)"
+//	@Failure		401		{object}	ErrorResponse
+//	@Failure		404		{object}	ErrorResponse	"User not found"
+//	@Failure		500		{object}	ErrorResponse
+//	@Router			/api/v1/users/{id} [patch]
+func (h *UserHandler) UpdateName(w http.ResponseWriter, r *http.Request) {
+```
+
+Lalu generate ulang spec dan rapikan format anotasinya:
+
+```bash
+make swagger    # tulis ulang gen/openapi/{docs.go,swagger.json,swagger.yaml}
+make fmt        # termasuk `swag fmt` untuk merapikan anotasi
+```
+
+Catatan:
+
+- `@ID` wajib diisi dan unik (camelCase). Nilai ini jadi nama fungsi di client TypeScript yang di-generate frontend (contoh `getUser`, `createUser`, `updateUserName`).
+- `@Router` ditulis dengan path lengkap (`/api/v1/...`) karena `@BasePath` di `cmd/app/main.go` adalah `/`.
+- Kalau handler atau DTO ada di package baru (contoh `internal/controller/rest/order` atau `internal/controller/dto/order`), tambahkan folder itu ke `SWAG_DIRS` di `Makefile`. Kalau tidak, swag gagal dengan error `cannot find type definition`.
+- File di `gen/openapi` di-commit. `make swagger-check` (untuk CI) gagal kalau spec belum di-generate ulang setelah anotasi berubah.
+
+**Langkah 10 - Router** (`internal/router/http.go`). Route di dalam group `/api/v1` otomatis mendapat middleware request log, auth, dan timeout:
 
 ```go
 r.Route("/users", func(r chi.Router) {
@@ -540,7 +587,7 @@ r.Route("/users", func(r chi.Router) {
 
 Untuk domain baru (contoh `orders`), buat `service/order`, `repository/postgres/order_repository.go`, `controller/rest/order_handler.go`, sambungkan di `internal/app/app.go`, lalu tambah `r.Route("/orders", ...)`.
 
-**Langkah 10 - Cek:**
+**Langkah 11 - Cek:**
 
 ```bash
 make test lint
@@ -548,6 +595,8 @@ make run
 curl -X PATCH localhost:8080/api/v1/users/01928f6a-0000-7000-8000-000000000001 \
   -H 'Content-Type: application/json' -d '{"name":"Andi P."}'
 ```
+
+Buka http://localhost:8080/swagger/index.html, pastikan endpoint `PATCH /api/v1/users/{id}` muncul di tag **users**, lalu coba lewat tombol **Try it out**.
 
 ---
 
@@ -785,8 +834,10 @@ Jalankan `make` atau `make help` untuk daftar lengkap.
 | `make run` | Jalankan service |
 | `make build` | Build binary ke `./bin` |
 | `make test` / `make cover` | Unit test / dengan coverage |
-| `make lint` / `make fmt` | Lint / format (Go + proto) |
-| `make generate` | `make proto` + `make mocks` |
+| `make lint` / `make fmt` | Lint / format (Go, anotasi swagger, proto) |
+| `make generate` | `make proto` + `make mocks` + `make swagger` |
+| `make swagger` | Generate Swagger 2.0 ke `gen/openapi` |
+| `make swagger-check` | Gagal kalau `gen/openapi` belum di-generate ulang (untuk CI) |
 | `make migrate-up` / `migrate-down` / `seed` | Database |
 | `make infra-up` | PostgreSQL + Redis |
 | `make infra-mq-up` | RabbitMQ |
@@ -809,6 +860,9 @@ Jalankan `make` atau `make help` untuk daftar lengkap.
 | Log `redis not reachable at startup` | Redis mati | Service tetap jalan tanpa cache; nyalakan Redis |
 | `Dirty database version N` | Migration gagal di tengah | Perbaiki SQL, lalu `go run ./cmd/migrate force <versi terakhir yang sukses>` |
 | `PRECONDITION_FAILED - inequivalent arg` di RabbitMQ | Queue sudah ada dengan argumen berbeda | Hapus queue tersebut di UI RabbitMQ, lalu start ulang |
+| `make swagger` gagal: `cannot find type definition: x.Y` | Package tipe tersebut belum dipindai swag | Tambahkan foldernya ke `SWAG_DIRS` di `Makefile` |
+| Endpoint baru tidak muncul di Swagger UI | Spec belum di-generate ulang | `make swagger`, lalu restart service |
+| `/swagger/index.html` balas 404 | Swagger dimatikan | Set `SWAGGER_ENABLED=true` |
 | Trace/log tidak muncul di Grafana | OTel mati atau collector belum jalan | Cek `OTEL_ENABLED=true`, `make infra-otel-up`, `docker compose -f docker-compose.optional.yml logs otel-collector` |
 | Metric baru muncul setelah beberapa detik | Metric dikirim berkala | Tunggu `OTEL_METRIC_EXPORT_INTERVAL` (default 15 detik) |
 | `the Go language version ... is lower than the targeted Go version` saat lint | golangci-lint dibangun dengan Go lama | Jalankan lewat `make lint` (memakai versi Go dari `go.mod`) |
@@ -820,12 +874,13 @@ Jalankan `make` atau `make help` untuk daftar lengkap.
 
 Template ini fokus ke struktur dan pola. Sebelum production, pertimbangkan:
 
-- **Auth:** isi placeholder di `internal/middleware/http.go` (`Auth`) dan `internal/middleware/grpc.go` (`GRPCAuth`).
+- **Auth:** placeholder ada di `internal/middleware/http.go` (`Auth`) dan `internal/middleware/grpc.go` (`GRPCAuth`). Panduan memasang Zitadel (login, role per tenant, integrasi frontend) ada di [`docs/ZITADEL_INTEGRATION.md`](docs/ZITADEL_INTEGRATION.md).
 - **Event tidak boleh hilang:** sekarang event dipublish setelah data tersimpan; kalau broker mati saat itu, event hilang (tercatat di log error). Untuk jaminan penuh pakai *transactional outbox*: simpan event di tabel yang sama dalam satu transaksi DB, lalu kirim ke broker oleh proses terpisah.
 - **Queue RabbitMQ:** template memakai classic durable queue. Untuk cluster, pertimbangkan *quorum queue* (`x-queue-type: quorum`).
 - **Log:** pakai `LOG_FORMAT=json` dan `LOG_LEVEL=info` di server. Level `debug` menulis header dan response body.
 - **Sampling trace:** turunkan `OTEL_TRACES_SAMPLER_ARG` (contoh `0.1`) untuk traffic besar.
 - **Proxy:** set `HTTP_TRUSTED_PROXIES` sesuai jumlah load balancer/ingress di depan app supaya IP client di log benar.
+- **Swagger UI:** biarkan `SWAGGER_ENABLED=false` (default di kode) di production, atau lindungi path `/swagger` di gateway.
 - **gRPC reflection:** matikan (`GRPC_REFLECTION_ENABLED=false`) kalau tidak ingin daftar service terlihat publik.
 - **Secret:** isi `DB_PASSWORD`, `RABBITMQ_URL`, dan lainnya dari secret manager, bukan dari file `.env`.
 - **Grafana lokal** memakai login `admin/admin` dan bukan konfigurasi production.

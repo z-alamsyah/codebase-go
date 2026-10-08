@@ -47,6 +47,9 @@ type HTTP struct {
 	// in front of the app. 0 = use the TCP peer address and ignore
 	// X-Forwarded-For, which clients can forge.
 	TrustedProxies int `env:"HTTP_TRUSTED_PROXIES" envDefault:"0"`
+	// SwaggerEnabled serves Swagger UI at /swagger/index.html. Off by default
+	// so production does not expose the API description unless asked to.
+	SwaggerEnabled bool `env:"SWAGGER_ENABLED" envDefault:"false"`
 }
 
 type GRPC struct {

@@ -1,12 +1,19 @@
 # Tool versions that are not pinned in go.mod (they run with `go run`).
 BUF_VERSION           := v1.73.0
 GOLANGCI_LINT_VERSION := v2.14.0
+SWAG_VERSION          := v1.16.6
 
 # Build the tools with the project's Go version (go.mod), so the linter
 # understands the newest language features.
 GO_TOOLCHAIN  := $(shell go env GOVERSION)
 BUF           := GOTOOLCHAIN=$(GO_TOOLCHAIN) go run github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
 GOLANGCI_LINT := GOTOOLCHAIN=$(GO_TOOLCHAIN) go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+SWAG          := GOTOOLCHAIN=$(GO_TOOLCHAIN) go run github.com/swaggo/swag/cmd/swag@$(SWAG_VERSION)
+
+# Folders swag scans for annotations. The first one must hold the general
+# API info (cmd/app/main.go). Add a folder here when its types or handlers
+# appear in the Swagger spec.
+SWAG_DIRS := ./cmd/app,./internal/controller/rest,./internal/controller/dto,./internal/model
 
 COMPOSE_CORE     := docker compose -f docker-compose.yml
 COMPOSE_OPTIONAL := docker compose -f docker-compose.optional.yml
@@ -48,8 +55,9 @@ lint: ## Run golangci-lint and buf lint
 	$(BUF) lint
 
 .PHONY: fmt
-fmt: ## Format code
+fmt: ## Format code (Go, swagger annotations, proto)
 	$(GOLANGCI_LINT) fmt ./...
+	$(SWAG) fmt -d $(SWAG_DIRS)
 	$(BUF) format -w
 
 .PHONY: tidy
@@ -59,7 +67,7 @@ tidy: ## Tidy go.mod
 ## ---- Code generation
 
 .PHONY: generate
-generate: proto mocks ## Generate protobuf code and mocks
+generate: proto mocks swagger ## Generate protobuf code, mocks and Swagger docs
 
 .PHONY: proto
 proto: ## Generate Go code from api/proto
@@ -68,6 +76,14 @@ proto: ## Generate Go code from api/proto
 .PHONY: mocks
 mocks: ## Generate mocks (go:generate directives in ports.go files)
 	go generate ./...
+
+.PHONY: swagger
+swagger: ## Generate Swagger 2.0 docs from annotations into gen/openapi
+	$(SWAG) init -g main.go -d $(SWAG_DIRS) --parseInternal -o gen/openapi --outputTypes go,json,yaml --quiet
+
+.PHONY: swagger-check
+swagger-check: swagger ## Fail if gen/openapi is out of date (for CI)
+	@git diff --exit-code -- gen/openapi || (echo "Swagger docs are out of date: run 'make swagger' and commit the result" && exit 1)
 
 ## ---- Database
 
