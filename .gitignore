@@ -1,0 +1,21 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Build output
+/bin/
+/dist/
+*.exe
+*.test
+
+# Test and coverage
+coverage.out
+coverage.html
+*.coverprofile
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

@@ -1,0 +1,103 @@
+# Optional local dependencies, grouped by compose profile:
+#   mq   -> RabbitMQ (+ management UI on http://localhost:15672, guest/guest)
+#   otel -> OpenTelemetry Collector, Tempo (traces), Loki (logs),
+#           Prometheus (metrics), Grafana (http://localhost:3000, admin/admin)
+#
+#   docker compose -f docker-compose.optional.yml --profile mq up -d
+#   docker compose -f docker-compose.optional.yml --profile otel up -d
+#   docker compose -f docker-compose.optional.yml --profile mq --profile otel up -d
+name: codebase-go
+
+services:
+  rabbitmq:
+    profiles: [mq]
+    image: rabbitmq:4.3.6-management-alpine
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_UI_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # The app sends traces, metrics and logs here over OTLP (gRPC :4317 / HTTP :4318).
+  otel-collector:
+    profiles: [otel]
+    image: otel/opentelemetry-collector-contrib:0.162.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./deployments/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "${OTEL_GRPC_PORT:-4317}:4317"
+      - "${OTEL_HTTP_PORT:-4318}:4318"
+    depends_on:
+      - tempo
+      - loki
+      - prometheus
+    restart: unless-stopped
+
+  tempo:
+    profiles: [otel]
+    image: grafana/tempo:2.10.8
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    user: "0" # lets Tempo write to the named volume
+    volumes:
+      - ./deployments/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    restart: unless-stopped
+
+  loki:
+    profiles: [otel]
+    image: grafana/loki:3.7.8
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    user: "0"
+    volumes:
+      - ./deployments/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    restart: unless-stopped
+
+  prometheus:
+    profiles: [otel]
+    image: prom/prometheus:v3.15.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-otlp-receiver # accepts OTLP metrics from the collector
+      - --web.enable-remote-write-receiver # accepts service-graph metrics from Tempo
+      - --enable-feature=exemplar-storage
+    volumes:
+      - ./deployments/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    restart: unless-stopped
+
+  grafana:
+    profiles: [otel]
+    image: grafana/grafana:13.2.3
+    environment:
+      # Local only. Login: admin / admin (skip the change-password prompt).
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./deployments/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deployments/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - tempo
+      - loki
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  rabbitmq-data:
+  tempo-data:
+  loki-data:
+  prometheus-data:
+  grafana-data:

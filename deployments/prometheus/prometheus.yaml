@@ -1,0 +1,15 @@
+# Metrics arrive via the OTLP receiver (collector) and remote write (Tempo),
+# so there is nothing to scrape except Prometheus itself.
+global:
+  scrape_interval: 15s
+
+otlp:
+  # Turn the OTel resource attribute into a label for easy filtering.
+  promote_resource_attributes:
+    - service.name
+    - deployment.environment.name
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

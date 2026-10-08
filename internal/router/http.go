@@ -1,0 +1,71 @@
+// Package router is the router layer: it maps routes, RPC services and
+// queues to controllers and attaches middleware per group. No logic here.
+package router
+
+import (
+	"log/slog"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
+	"github.com/z-alamsyah/codebase-go/internal/config"
+	"github.com/z-alamsyah/codebase-go/internal/controller/rest"
+	"github.com/z-alamsyah/codebase-go/internal/middleware"
+)
+
+type HTTPDeps struct {
+	Config config.Config
+	Logger *slog.Logger
+	Health *rest.HealthHandler
+	User   *rest.UserHandler
+}
+
+// NewHTTP builds the HTTP handler. Health checks are always served; business
+// routes under /api are mounted only when REST_ENABLED=true.
+func NewHTTP(d HTTPDeps) http.Handler {
+	r := chi.NewRouter()
+
+	// Global middleware (also applies to health checks).
+	r.Use(middleware.RequestID, clientIP(d.Config.HTTP.TrustedProxies), chimw.Recoverer)
+	if d.Config.Otel.Enabled {
+		r.Use(
+			otelhttp.NewMiddleware("http.server",
+				otelhttp.WithFilter(func(r *http.Request) bool { return r.URL.Path != "/healthz" && r.URL.Path != "/readyz" }),
+			),
+			middleware.RouteTag,
+		)
+	}
+
+	// Health checks: no auth, no request log.
+	r.Get("/healthz", d.Health.Liveness)
+	r.Get("/readyz", d.Health.Readiness)
+
+	if d.Config.HTTP.RESTEnabled {
+		r.Route("/api/v1", func(r chi.Router) {
+			// Business endpoints: request log -> auth -> timeout.
+			r.Use(
+				middleware.RequestLogger(d.Logger, d.Config.Log),
+				middleware.Auth,
+				chimw.Timeout(d.Config.HTTP.RequestTimeout),
+			)
+
+			r.Route("/users", func(r chi.Router) {
+				r.Post("/", d.User.Create)
+				r.Get("/{id}", d.User.GetByID)
+			})
+		})
+	}
+
+	return r
+}
+
+// clientIP resolves the real client IP for logs. X-Forwarded-For is trusted
+// only when HTTP_TRUSTED_PROXIES says how many proxies added entries to it.
+func clientIP(trustedProxies int) func(http.Handler) http.Handler {
+	if trustedProxies > 0 {
+		return chimw.ClientIPFromXFFTrustedProxies(trustedProxies)
+	}
+	return chimw.ClientIPFromRemoteAddr
+}
